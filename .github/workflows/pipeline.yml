@@ -1,5 +1,5 @@
 # Nome do Workflow
-name: DevOpsLab Pipeline
+name: DevOpsLab Pipeline with SonarCloud
 
 # Evento que irá acionar a pipeline
 on:
@@ -11,69 +11,50 @@ jobs:
   Build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      # Checkout the repository
+      - name: Download do Repositório
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Ensures the full history is pulled
 
+      # Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      # Install requirements
       - name: Install Requirements
-        run: |
-          pip install flask
-          pip install flask-wtf
+        run: pip install flask
 
-      - name: Run Unit Tests
+      # Run Unit Tests
+      - name: Unit Test
         run: python -m unittest -v test
 
+      # SonarCloud Scan
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v4.1.0
         with:
           args: >
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.sources=.
+            -Dsonar.python.version=3.10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: Login to Artifact Registry
+      # Login to Google Artifact Registry
+      - name: Login no Artifact Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.GOOGLE_ARTIFACT }}
+          registry: '${{ vars.GOOGLE_ARTIFACT }}'
           username: _json_key
-          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+          password: '${{ secrets.GOOGLE_CREDENTIALS }}'
 
-      - name: Build Docker Image
+      # Build Docker Image
+      - name: Build Image
         run: |
-          docker build -t ${{ secrets.GOOGLE_ARTIFACT }}/${{ secrets.GOOGLE_PROJECT_ID }}/${{ secrets.GOOGLE_REPONAME }}/${{ secrets.GOOGLE_MYAPP }}:latest .
+          docker build -t ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest .
 
-      - name: Push Docker Image
+      # Push Docker Image
+      - name: Push Image
         run: |
-          docker push ${{ secrets.GOOGLE_ARTIFACT }}/${{ secrets.GOOGLE_PROJECT_ID }}/${{ secrets.GOOGLE_REPONAME }}/${{ secrets.GOOGLE_MYAPP }}:latest
-
-  Deploy:
-    needs: Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Authenticate with GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
-      - name: Deploy to Cloud Run
-        id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ secrets.GOOGLE_MYAPP }}
-          region: ${{ secrets.GOOGLE_REGION }}
-          image: ${{ secrets.GOOGLE_ARTIFACT }}/${{ secrets.GOOGLE_PROJECT_ID }}/${{ secrets.GOOGLE_REPONAME }}/${{ secrets.GOOGLE_MYAPP }}:latest
-          flags: '--allow-unauthenticated'
-
-      - name: Validate API Deployment
-        run: |
-          curl "${{ steps.deploy.outputs.url }}"
+          docker push ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest
