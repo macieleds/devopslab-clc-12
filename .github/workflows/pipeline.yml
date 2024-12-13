@@ -24,3 +24,6 @@ jobs:
               
       - name: Unit Test
         run: python -m unittest -v test
+
+      - name: Install Requirements
+        run:  pip install flask flask-wtf
