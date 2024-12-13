@@ -23,7 +23,8 @@ jobs:
 
       # Install requirements
       - name: Install Requirements
-        run: pip install flask
+        run: |
+          pip install -r requirements.txt
 
       # Run Unit Tests
       - name: Unit Test
