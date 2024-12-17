@@ -59,3 +59,22 @@ jobs:
       - name: Push Image
         run: |
           docker push ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest
+
+  DAST:
+    needs: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      # Checkout the repository
+      - name: Download do Repositório
+        uses: actions/checkout@v4
+
+      # Run ZAP Full Scan
+      - name: DAST (ZAP Scan)
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          target: 'https://edimaciel-fgxq5tbfwq-ue.a.run.app'
