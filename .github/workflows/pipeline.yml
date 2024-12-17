@@ -1,80 +1,140 @@
 # Nome do Workflow
-name: DevOpsLab Pipeline with SonarCloud
+name: DevOpsLab Pipeline
 
 # Evento que irá acionar a pipeline
-on:
+on: 
   push:
     branches:
       - main
 
 jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Requirements (Sonar Necessities)
+      run: pip install -r requirements.txt
+
+    - name: SonarCloud Scan
+      uses: sonarsource/sonarcloud-github-action@v4
+      with:
+        args: >
+          -Dsonar.projectKey=leosilvasouza_devopslab
+          -Dsonar.organization=leosilvasouza
+          -Dsonar.sources=.
+          -Dsonar.host.url=https://sonarcloud.io
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        
   Build:
     runs-on: ubuntu-latest
     steps:
-      # Checkout the repository
       - name: Download do Repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3       # https://github.com/actions/checkout
 
-      # Setup Python
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4   # https://github.com/actions/setup-python
         with:
           python-version: '3.10'
 
-      # Install requirements
       - name: Install Requirements
-        run: |
-          pip install -r requirements.txt
-
-      # Run Unit Tests
+        run:  pip install flask
+              
       - name: Unit Test
         run: python -m unittest -v test
 
-      # SonarCloud Scan
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v4.1.0
-        with:
-          args: >
-            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
-            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
-            -Dsonar.sources=.
-            -Dsonar.python.version=3.10
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      # Login to Google Artifact Registry
       - name: Login no Artifact Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3      # https://github.com/marketplace/actions/docker-login#google-artifact-registry-gar
         with:
           registry: '${{ vars.GOOGLE_ARTIFACT }}'
           username: _json_key
           password: '${{ secrets.GOOGLE_CREDENTIALS }}'
 
-      # Build Docker Image
       - name: Build Image
         run: |
-          docker build -t ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest .
+          docker build -t ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest -f Dockerfile .
 
-      # Push Docker Image
       - name: Push Image
         run: |
           docker push ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest
 
-  DAST:
+  Deploy:
     needs: Build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.url }}
+      
     steps:
-      # Checkout the repository
       - name: Download do Repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4       # https://github.com/actions/checkout
 
-      # Run ZAP Full Scan
-      - name: DAST (ZAP Scan)
-        uses: zaproxy/action-full-scan@v0.12.0
+      - name: Login no GCP
+        uses: 'google-github-actions/auth@v2' # https://github.com/google-github-actions/auth
         with:
-          target: 'https://edimaciel-fgxq5tbfwq-ue.a.run.app'
+          credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+
+      - name: Cloud Run Deploy
+        id: deploy
+        uses: 'google-github-actions/deploy-cloudrun@v2'  # https://github.com/marketplace/actions/deploy-to-cloud-run
+        with:
+          service: ${{ vars.GOOGLE_MYAPP }}
+          region: ${{ vars.GOOGLE_REGION }}
+          image: ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest
+          flags: '--allow-unauthenticated'
+
+      - name: Validando a API
+        run: 'curl "${{ steps.deploy.outputs.url }}"'
+
+      - name: Notificação Slack
+        id: slack
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "DevOpsLab Pipeline leosilvasouza : ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "DevOpsLab Pipeline leosilvasouza: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_NOTIFICATIONS_TOKEN }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK  
+
+  DAST:
+    needs: Deploy
+    runs-on: ubuntu-latest
+    permissions:
+     contents: write
+     issues: write
+     pull-requests: write
+     
+    steps:
+      - name: Validando a URL para ZAP Proxy Scan
+        run: 'curl "${{ needs.Deploy.outputs.deployment_url }}"'
+        
+      - name: ZAP Proxy Scan
+        uses: zaproxy/action-full-scan@v0.8.0
+        with:
+          token: ${{ secrets.ZAP_TOKEN }}
+          target: "${{ needs.Deploy.outputs.deployment_url }}"
+          rules_file_name: '.zap/rules.json'
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-report
+          path: report.xml
