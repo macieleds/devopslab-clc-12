@@ -47,6 +47,9 @@ jobs:
 
       - name: Install Requirements
         run: pip install flask gunicorn flask-wtf
+
+      - name: Install New Relic
+        run: pip install newrelic
               
       - name: Unit Test
         run: python -m unittest -v test
