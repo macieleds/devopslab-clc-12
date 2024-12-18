@@ -129,7 +129,6 @@ jobs:
       - name: ZAP Proxy Scan
         uses: zaproxy/action-full-scan@v0.8.0
         with:
-          token: ${{ secrets.ZAP_TOKEN }}
           target: "${{ needs.Deploy.outputs.deployment_url }}"
           rules_file_name: '.zap/rules.json'
 
